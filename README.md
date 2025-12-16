@@ -20,5 +20,9 @@ If you place a borough boundary GeoJSON at `data/nyc_boroughs.geojson`, the Geos
 ## Data
 This repo does not commit the main CSV because it exceeds GitHub's file size limit.
 
-- Download the dataset from NYC Open Data: https://data.cityofnewyork.us/Housing-Development/Electric-Consumption-And-Cost-2010-May-2025-/jr24-e7cr/about_data
-- Save it as `data/Electric_Consumption_And_Cost_2010_-_May_2025_.csv`
+The app now auto-downloads the dataset from NYC Open Data on startup (and caches it locally):
+
+- API CSV export: https://data.cityofnewyork.us/api/v3/views/jr24-e7cr/query.csv
+- Local cache path: `data/Electric_Consumption_And_Cost_2010_-_May_2025_.csv`
+
+If you prefer to download manually, save the dataset to the same local cache path above.

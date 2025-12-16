@@ -9,6 +9,14 @@ from typing import Any, Optional, cast
 import time
 import warnings
 
+
+APP_DIR = Path(__file__).resolve().parent
+DATA_DIR = APP_DIR / "data"
+
+# NYC Open Data CSV export (Socrata)
+NYC_OPEN_DATA_CSV_URL = "https://data.cityofnewyork.us/api/v3/views/jr24-e7cr/query.csv"
+LOCAL_DATA_CSV_PATH = DATA_DIR / "Electric_Consumption_And_Cost_2010_-_May_2025_.csv"
+
 try:
     from urllib3.exceptions import NotOpenSSLWarning
     warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
@@ -17,6 +25,49 @@ except Exception:
 
 # Suppress Prophet warnings
 warnings.filterwarnings("ignore")
+
+
+def _download_csv_to_file(url: str, dest_path: Path, *, timeout_seconds: int = 120) -> None:
+    import requests
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
+
+    with requests.get(url, stream=True, timeout=timeout_seconds) as resp:
+        resp.raise_for_status()
+        with tmp_path.open("wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+    tmp_path.replace(dest_path)
+
+
+def get_dataset_csv_path(*, max_age_seconds: int = 24 * 60 * 60) -> Optional[Path]:
+    """Ensures a local CSV exists (downloaded from the API if needed) and returns its path."""
+    path = LOCAL_DATA_CSV_PATH
+
+    try:
+        if path.exists():
+            age_seconds = time.time() - path.stat().st_mtime
+            if age_seconds <= max_age_seconds:
+                return path
+
+        _download_csv_to_file(NYC_OPEN_DATA_CSV_URL, path)
+        return path
+    except Exception as e:
+        if path.exists():
+            st.warning(
+                "Could not refresh dataset from NYC Open Data API; using existing local CSV. "
+                f"(Error: {e})"
+            )
+            return path
+
+        st.error(
+            "CRITICAL ERROR: Could not download dataset from NYC Open Data API and no local CSV exists. "
+            f"(Error: {e})"
+        )
+        return None
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURATION & THEME
@@ -168,11 +219,12 @@ def _yoy_color_rgba(yoy_pct: float) -> list[int]:
     return [int(rgb[0]), int(rgb[1]), int(rgb[2]), 170]
 
 @st.cache_data
-def load_data():
+def load_data(file_path_str: str, file_mtime: float):
     """
     Loads, cleans, and aggregates the NYC Energy dataset.
     """
-    file_path = "data/Electric_Consumption_And_Cost_2010_-_May_2025_.csv"
+    _ = file_mtime  # used for cache invalidation when the CSV changes
+    file_path = Path(file_path_str)
     
     try:
         # Load specific columns to save memory (plus optional cost fields when present)
@@ -185,14 +237,14 @@ def load_data():
             "Other charges",
         ]
         df = pd.read_csv(
-            file_path,
+            file_path.as_posix(),
             usecols=lambda c: c in set(cols),
             thousands=",",
             parse_dates=["Revenue Month"],
             low_memory=False,
         )
     except FileNotFoundError:
-        st.error(f"CRITICAL ERROR: Data file not found at {file_path}")
+        st.error(f"CRITICAL ERROR: Data file not found at {file_path.as_posix()}")
         return None, None, None
 
     # 1. Clean Data
@@ -260,7 +312,14 @@ def run_prophet_diagnostics(df_train, use_summer):
 
 # Load Data
 with st.spinner("Initializing System Core..."):
-    df_raw, df_map, df_monthly = load_data()
+    dataset_path = get_dataset_csv_path()
+    if dataset_path is None:
+        df_raw, df_map, df_monthly = None, None, None
+    else:
+        df_raw, df_map, df_monthly = load_data(
+            dataset_path.as_posix(),
+            dataset_path.stat().st_mtime,
+        )
 
 # -----------------------------------------------------------------------------
 # 3. UI LAYOUT & NAVIGATION
@@ -560,8 +619,9 @@ if mode == "🌍 Geospatial Intelligence":
 
     with tabs[3]:
         st.markdown("### Borough Polygon Mode")
-        geojson_path = Path("data/nyc_boroughs.geojson")
-        data_geojsons = sorted(Path("data").glob("*.geojson")) if Path("data").exists() else []
+        geojson_path = APP_DIR / "data" / "nyc_boroughs.geojson"
+        data_dir = APP_DIR / "data"
+        data_geojsons = sorted(data_dir.glob("*.geojson")) if data_dir.exists() else []
 
         st.caption(
             "Provide a borough boundary GeoJSON to enable polygon choropleths. "
