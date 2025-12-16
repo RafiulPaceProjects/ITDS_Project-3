@@ -71,9 +71,9 @@ def render_soda_token_prompt() -> None:
 
     with st.sidebar.expander("Where do I get a token?"):
         st.markdown(
-            "- Create/manage tokens: https://data.cityofnewyork.us/profile/edit/developer_settings\n"
-            "- SODA App Tokens docs: https://dev.socrata.com/docs/app-tokens.html\n"
-            "- Dataset API docs: https://dev.socrata.com/foundry/data.cityofnewyork.us/jr24-e7cr"
+            "- [Create/manage tokens](https://data.cityofnewyork.us/profile/edit/developer_settings)\n"
+            "- [SODA app tokens docs](https://dev.socrata.com/docs/app-tokens.html)\n"
+            "- [Dataset API docs](https://dev.socrata.com/foundry/data.cityofnewyork.us/jr24-e7cr)"
         )
 
 
@@ -204,6 +204,12 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6, p, div, span {
         color: #FAFAFA !important;
         font-family: 'Courier New', monospace;
+    }
+
+    /* Prevent long links from overflowing */
+    a {
+        word-break: break-word;
+        overflow-wrap: anywhere;
     }
     
     /* Neon Accents */
