@@ -26,3 +26,18 @@ The app now auto-downloads the dataset from NYC Open Data on startup (and caches
 - Local cache path: `data/Electric_Consumption_And_Cost_2010_-_May_2025_.csv`
 
 If you prefer to download manually, save the dataset to the same local cache path above.
+
+### Fixing 403 (Forbidden)
+NYC Open Data's SODA API v3 may require an app token.
+
+Option A (recommended for Streamlit): create `.streamlit/secrets.toml`:
+
+```toml
+SODA_APP_TOKEN = "<your token>"
+```
+
+Option B: set an environment variable before running the app:
+
+- `export SODA_APP_TOKEN="<your token>"`
+
+The token is not committed to git (and `.streamlit/secrets.toml` is ignored).

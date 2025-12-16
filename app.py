@@ -14,8 +14,9 @@ import warnings
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 
-# NYC Open Data CSV export (Socrata)
-NYC_OPEN_DATA_CSV_URL = "https://data.cityofnewyork.us/api/v3/views/jr24-e7cr/query.csv"
+# NYC Open Data CSV export (Socrata SODA v3)
+# The docs recommend the dedicated export endpoint for bulk offline downloads.
+NYC_OPEN_DATA_CSV_URL = "https://data.cityofnewyork.us/api/v3/views/jr24-e7cr/export.csv?accessType=DOWNLOAD"
 LOCAL_DATA_CSV_PATH = DATA_DIR / "Electric_Consumption_And_Cost_2010_-_May_2025_.csv"
 
 try:
