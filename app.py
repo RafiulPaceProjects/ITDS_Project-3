@@ -1206,4 +1206,4 @@ elif mode == "🧪 Model Lab":
 
 # Footer
 st.markdown("---")
-st.markdown("NYC Energy Pulse v2.0 | System Architect: GitHub Copilot")
+
