@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objs as go
 import numpy as np
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional, cast
 import time
@@ -27,13 +28,73 @@ except Exception:
 warnings.filterwarnings("ignore")
 
 
-def _download_csv_to_file(url: str, dest_path: Path, *, timeout_seconds: int = 120) -> None:
+def _get_soda_app_token() -> Optional[str]:
+    session_token = st.session_state.get("soda_app_token")
+    if isinstance(session_token, str) and session_token.strip():
+        return session_token.strip()
+
+    token = os.getenv("NYC_OPEN_DATA_APP_TOKEN") or os.getenv("SODA_APP_TOKEN")
+    if token:
+        token = token.strip()
+        return token if token else None
+
+    try:
+        token = st.secrets.get("NYC_OPEN_DATA_APP_TOKEN") or st.secrets.get("SODA_APP_TOKEN")
+        if token is None:
+            return None
+        token_str = str(token).strip()
+        return token_str if token_str else None
+    except Exception:
+        return None
+
+
+def render_soda_token_prompt() -> None:
+    """Renders a startup prompt for users to supply a SODA app token (optional)."""
+    st.sidebar.markdown("### DATA SOURCE")
+    st.sidebar.caption(
+        "NYC Open Data may require an app token for bulk downloads. "
+        "If the dataset download shows 403 (Forbidden), add a token here."
+    )
+
+    st.sidebar.text_input(
+        "SODA App Token (optional)",
+        key="soda_app_token",
+        type="password",
+        placeholder="Paste your app token",
+        help=(
+            "Find or create an app token in your NYC Open Data developer settings, "
+            "or read the SODA docs on app tokens. "
+            "You can also set env var SODA_APP_TOKEN / NYC_OPEN_DATA_APP_TOKEN."
+        ),
+    )
+
+    with st.sidebar.expander("Where do I get a token?"):
+        st.markdown(
+            "- Create/manage tokens: https://data.cityofnewyork.us/profile/edit/developer_settings\n"
+            "- SODA App Tokens docs: https://dev.socrata.com/docs/app-tokens.html\n"
+            "- Dataset API docs: https://dev.socrata.com/foundry/data.cityofnewyork.us/jr24-e7cr"
+        )
+
+
+def _stream_download_to_path(
+    url: str,
+    dest_path: Path,
+    *,
+    timeout_seconds: int,
+    headers: dict[str, str],
+    params: Optional[dict[str, str]] = None,
+) -> None:
     import requests
 
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
 
-    with requests.get(url, stream=True, timeout=timeout_seconds) as resp:
+    with requests.get(
+        url,
+        stream=True,
+        timeout=timeout_seconds,
+        headers=headers,
+        params=params,
+    ) as resp:
         resp.raise_for_status()
         with tmp_path.open("wb") as f:
             for chunk in resp.iter_content(chunk_size=1024 * 1024):
@@ -43,9 +104,54 @@ def _download_csv_to_file(url: str, dest_path: Path, *, timeout_seconds: int = 1
     tmp_path.replace(dest_path)
 
 
-def get_dataset_csv_path(*, max_age_seconds: int = 24 * 60 * 60) -> Optional[Path]:
+def _download_csv_to_file(
+    url: str,
+    dest_path: Path,
+    *,
+    timeout_seconds: int = 120,
+    app_token: Optional[str] = None,
+) -> None:
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    headers = {
+        "User-Agent": "nyc-energy-pulse/1.0 (streamlit)",
+        "Accept": "text/csv",
+    }
+
+    if app_token:
+        headers["X-App-Token"] = app_token
+
+    try:
+        _stream_download_to_path(
+            url,
+            dest_path,
+            timeout_seconds=timeout_seconds,
+            headers=headers,
+        )
+        return
+    except Exception as e:
+        # Some SODA deployments prefer the token as a query param.
+        try:
+            import requests
+
+            if app_token and isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 403:
+                _stream_download_to_path(
+                    url,
+                    dest_path,
+                    timeout_seconds=timeout_seconds,
+                    headers={k: v for k, v in headers.items() if k != "X-App-Token"},
+                    params={"app_token": app_token},
+                )
+                return
+        except Exception:
+            pass
+
+        raise
+
+
+def get_dataset_csv_path(*, max_age_seconds: int = 24 * 60 * 60, app_token_override: Optional[str] = None) -> Optional[Path]:
     """Ensures a local CSV exists (downloaded from the API if needed) and returns its path."""
     path = LOCAL_DATA_CSV_PATH
+    app_token = (app_token_override.strip() if isinstance(app_token_override, str) and app_token_override.strip() else None) or _get_soda_app_token()
 
     try:
         if path.exists():
@@ -53,9 +159,15 @@ def get_dataset_csv_path(*, max_age_seconds: int = 24 * 60 * 60) -> Optional[Pat
             if age_seconds <= max_age_seconds:
                 return path
 
-        _download_csv_to_file(NYC_OPEN_DATA_CSV_URL, path)
+        _download_csv_to_file(NYC_OPEN_DATA_CSV_URL, path, app_token=app_token)
         return path
     except Exception as e:
+        if (not app_token) and ("403" in str(e) or "Forbidden" in str(e)):
+            st.error(
+                "NYC Open Data returned 403 (Forbidden). Configure a SODA app token via Streamlit secrets "
+                "or an environment variable (NYC_OPEN_DATA_APP_TOKEN or SODA_APP_TOKEN), then rerun."
+            )
+
         if path.exists():
             st.warning(
                 "Could not refresh dataset from NYC Open Data API; using existing local CSV. "
@@ -312,7 +424,8 @@ def run_prophet_diagnostics(df_train, use_summer):
 
 # Load Data
 with st.spinner("Initializing System Core..."):
-    dataset_path = get_dataset_csv_path()
+    render_soda_token_prompt()
+    dataset_path = get_dataset_csv_path(app_token_override=st.session_state.get("soda_app_token"))
     if dataset_path is None:
         df_raw, df_map, df_monthly = None, None, None
     else:
